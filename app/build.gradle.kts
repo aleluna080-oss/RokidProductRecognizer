@@ -9,7 +9,8 @@ android {
     defaultConfig {
         applicationId = "com.alexluna.rokidproduct"
         minSdk = 29
-        // Conservative sideload target; verify OS/camera access on the actual Rokid model.
+        // Conservative sideload target for Rokid/YodaOS compatibility.
+        // This app is being sideloaded, not published to Google Play.
         targetSdk = 32
         versionCode = 1
         versionName = "0.1.0"
@@ -28,6 +29,12 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    lint {
+        // targetSdk 32 is intentional for this Rokid sideload MVP.
+        // Suppress only the Google Play target-level lint check.
+        disable += "ExpiredTargetSdkVersion"
     }
 }
 
