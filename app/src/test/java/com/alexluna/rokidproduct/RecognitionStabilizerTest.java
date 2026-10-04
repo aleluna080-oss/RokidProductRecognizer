@@ -27,10 +27,10 @@ public class RecognitionStabilizerTest {
         assertFalse(filter.accept("Caja", 3150));
     }
 
-    @Test public void mapperDoesNotConfuseCanWithOtherWords() {
+    @Test public void mapperOnlyReturnsApprovedSpanishLabels() {
         assertEquals("Lata", ProductNameMapper.toDisplayName("Can"));
-        assertEquals("Candle", ProductNameMapper.toDisplayName("Candle"));
+        assertNull(ProductNameMapper.toDisplayName("Candle"));
         assertEquals("Botella", ProductNameMapper.toDisplayName(" Bottle "));
-        assertEquals("Objeto", ProductNameMapper.toDisplayName(null));
+        assertNull(ProductNameMapper.toDisplayName(null));
     }
 }

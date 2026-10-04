@@ -41,7 +41,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends ComponentActivity {
 
-    private static final float MIN_CONFIDENCE = 0.65f;
+    // V1.1: elevamos el filtro para reducir detecciones débiles.
+    // No representa "90% de exactitud real"; eso se validará con el modelo V2.
+    private static final float MIN_CONFIDENCE = 0.75f;
     private static final long ANALYSIS_INTERVAL_MS = 450L;
 
     private TextView productText;
@@ -60,10 +62,11 @@ public class MainActivity extends ComponentActivity {
     private boolean resumed;
     private ProcessCameraProvider cameraProvider;
     private ImageAnalysis imageAnalysis;
+
     private final Runnable expiryCheck = new Runnable() {
         @Override public void run() {
             if (stabilizer.expire(SystemClock.elapsedRealtime())) {
-                productText.setText("Apunta al producto");
+                productText.setText("Apunta a un objeto");
                 confidenceText.setText("");
             }
             hudHandler.postDelayed(this, 500L);
@@ -77,7 +80,7 @@ public class MainActivity extends ComponentActivity {
                 } else {
                     productText.setText("Permiso requerido");
                     confidenceText.setText("");
-                    statusText.setText("Activa el permiso de cámara para reconocer productos.");
+                    statusText.setText("Activa el permiso de cámara para reconocer objetos.");
                 }
             });
 
@@ -93,6 +96,7 @@ public class MainActivity extends ComponentActivity {
         productText = findViewById(R.id.productText);
         confidenceText = findViewById(R.id.confidenceText);
         statusText = findViewById(R.id.statusText);
+
         statusText.setOnClickListener(view -> {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                     != PackageManager.PERMISSION_GRANTED) {
@@ -139,22 +143,17 @@ public class MainActivity extends ComponentActivity {
                 CameraSelector selector = CameraSelector.DEFAULT_BACK_CAMERA;
                 if (!cameraProvider.hasCamera(selector)) {
                     if (cameraProvider.getAvailableCameraInfos().isEmpty()) {
-                        throw new IllegalStateException("No hay cámara Android accesible en estas gafas");
+                        throw new IllegalStateException("No hay una cámara accesible");
                     }
-                    // Some glasses expose their world-facing camera with nonstandard lens facing.
                     selector = new CameraSelector.Builder().addCameraFilter(infos ->
                             java.util.Collections.singletonList(infos.get(0))).build();
                 }
-                cameraProvider.bindToLifecycle(
-                        this,
-                        selector,
-                        imageAnalysis
-                );
 
-                statusText.setText("Cámara activa · apunta al producto");
+                cameraProvider.bindToLifecycle(this, selector, imageAnalysis);
+                statusText.setText("Cámara activa · apunta a un objeto");
             } catch (Exception e) {
                 productText.setText("Error de cámara");
-                statusText.setText(e.getClass().getSimpleName() + ": " + safeMessage(e));
+                statusText.setText("No se pudo iniciar la cámara");
             }
         }, ContextCompat.getMainExecutor(this));
     }
@@ -162,10 +161,13 @@ public class MainActivity extends ComponentActivity {
     @androidx.annotation.OptIn(markerClass = ExperimentalGetImage.class)
     private void analyzeFrame(@NonNull ImageProxy imageProxy) {
         long now = SystemClock.elapsedRealtime();
-        if (now - lastAnalysisAt < ANALYSIS_INTERVAL_MS || !processing.compareAndSet(false, true)) {
+
+        if (now - lastAnalysisAt < ANALYSIS_INTERVAL_MS
+                || !processing.compareAndSet(false, true)) {
             imageProxy.close();
             return;
         }
+
         lastAnalysisAt = now;
 
         synchronized (labelerLock) {
@@ -173,29 +175,37 @@ public class MainActivity extends ComponentActivity {
                 finishFrame(imageProxy);
                 return;
             }
+
             try {
                 Image mediaImage = imageProxy.getImage();
                 if (mediaImage == null) {
                     finishFrame(imageProxy);
                     return;
                 }
+
                 InputImage image = InputImage.fromMediaImage(
-                        mediaImage, imageProxy.getImageInfo().getRotationDegrees());
+                        mediaImage,
+                        imageProxy.getImageInfo().getRotationDegrees()
+                );
+
                 labeler.process(image)
                         .addOnSuccessListener(this::handleLabels)
                         .addOnFailureListener(error -> {
                             if (!destroyed && resumed) {
                                 stabilizer.accept(null, SystemClock.elapsedRealtime());
-                                statusText.setText("Reconocimiento: " + safeMessage(error));
+                                runOnUiThread(() ->
+                                        statusText.setText("No fue posible reconocer el objeto"));
                             }
                         })
-                        .addOnCompleteListener(Runnable::run, task -> finishFrame(imageProxy));
+                        .addOnCompleteListener(Runnable::run,
+                                task -> finishFrame(imageProxy));
+
             } catch (RuntimeException error) {
                 finishFrame(imageProxy);
                 hudHandler.post(() -> {
                     if (!destroyed && resumed) {
                         stabilizer.accept(null, SystemClock.elapsedRealtime());
-                        statusText.setText("Reconocimiento: " + safeMessage(error));
+                        statusText.setText("No fue posible analizar la imagen");
                     }
                 });
             }
@@ -212,66 +222,79 @@ public class MainActivity extends ComponentActivity {
 
     private void handleLabels(List<ImageLabel> labels) {
         if (destroyed || !resumed) return;
+
         ImageLabel best = null;
+        String bestDisplayName = null;
+
+        // V1.1: ignoramos por completo cualquier etiqueta sin traducción aprobada.
+        // Así nunca mostramos texto inglés ni confirmamos una clase desconocida.
         for (ImageLabel label : labels) {
-            if (label.getConfidence() >= MIN_CONFIDENCE
-                    && (best == null || label.getConfidence() > best.getConfidence())) {
+            if (label.getConfidence() < MIN_CONFIDENCE) continue;
+
+            String translated = ProductNameMapper.toDisplayName(label.getText());
+            if (translated == null) continue;
+
+            if (best == null || label.getConfidence() > best.getConfidence()) {
                 best = label;
+                bestDisplayName = translated;
             }
         }
 
-        if (best == null) {
+        if (best == null || bestDisplayName == null) {
             stabilizer.accept(null, SystemClock.elapsedRealtime());
             runOnUiThread(() -> {
-                statusText.setText("Buscando un producto reconocible…");
+                productText.setText("Objeto no identificado");
+                confidenceText.setText("");
+                statusText.setText("Buscando una categoría conocida…");
             });
             return;
         }
 
-        String rawLabel = best.getText();
-        float confidence = best.getConfidence();
+        final String displayName = bestDisplayName;
+        final float confidence = best.getConfidence();
 
-        String displayName = ProductNameMapper.toDisplayName(rawLabel);
         if (!stabilizer.accept(displayName, SystemClock.elapsedRealtime())) {
-            statusText.setText("Confirmando… " + displayName);
+            runOnUiThread(() ->
+                    statusText.setText("Confirmando detección…"));
             return;
         }
 
-        String confidenceString = String.format(
-                Locale.getDefault(),
-                "Confianza: %.0f%%",
+        final String confidenceString = String.format(
+                Locale.forLanguageTag("es-MX"),
+                "Confianza del modelo: %.0f%%",
                 confidence * 100f
         );
 
         runOnUiThread(() -> {
             productText.setText(displayName);
             confidenceText.setText(confidenceString);
-            statusText.setText("Detectado · " + rawLabel);
+            statusText.setText("Objeto detectado");
         });
     }
 
-    private static String safeMessage(Throwable t) {
-        String message = t.getMessage();
-        return (message == null || message.trim().isEmpty()) ? "sin detalle" : message;
-    }
-
-    @Override protected void onResume() {
+    @Override
+    protected void onResume() {
         super.onResume();
         resumed = true;
         hudHandler.post(expiryCheck);
     }
 
-    @Override protected void onRestart() {
+    @Override
+    protected void onRestart() {
         super.onRestart();
-        if (cameraProvider == null && ContextCompat.checkSelfPermission(this,
-                Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera();
+        if (cameraProvider == null
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED) {
+            startCamera();
+        }
     }
 
-    @Override protected void onPause() {
+    @Override
+    protected void onPause() {
         resumed = false;
         hudHandler.removeCallbacks(expiryCheck);
         stabilizer.reset();
-        productText.setText("Apunta al producto");
+        productText.setText("Apunta a un objeto");
         confidenceText.setText("");
         super.onPause();
     }
@@ -280,12 +303,25 @@ public class MainActivity extends ComponentActivity {
     protected void onDestroy() {
         synchronized (labelerLock) {
             destroyed = true;
-            if (labeler != null && !processing.get()) labeler.close();
+            if (labeler != null && !processing.get()) {
+                labeler.close();
+            }
         }
+
         hudHandler.removeCallbacksAndMessages(null);
-        if (imageAnalysis != null) imageAnalysis.clearAnalyzer();
-        if (cameraProvider != null) cameraProvider.unbindAll();
-        if (cameraExecutor != null) cameraExecutor.shutdown();
+
+        if (imageAnalysis != null) {
+            imageAnalysis.clearAnalyzer();
+        }
+
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+        }
+
+        if (cameraExecutor != null) {
+            cameraExecutor.shutdown();
+        }
+
         super.onDestroy();
     }
 }
