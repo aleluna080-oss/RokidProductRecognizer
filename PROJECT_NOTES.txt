@@ -1,0 +1,7 @@
+MVP V1: Generic offline product/category recognition for Rokid Glasses.
+Package: com.alexluna.rokidproduct
+Min SDK: 29
+Target SDK: 32
+Compile SDK: 35
+CameraX: 1.4.2 (compatible with compileSdk 35 / AGP 8.7.3)
+ML Kit bundled image labeling: 17.0.9

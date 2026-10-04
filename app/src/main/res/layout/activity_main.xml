@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!--
+      No camera preview is shown: on optical see-through glasses the user already
+      sees the real world. Black pixels emit no light; only the HUD text is visible.
+    -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:paddingTop="36dp"
+        android:paddingBottom="28dp">
+
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="RECONOCIMIENTO"
+            android:textColor="#FFFFFFFF"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:letterSpacing="0.08" />
+
+        <Space
+            android:layout_width="1dp"
+            android:layout_height="36dp" />
+
+        <TextView
+            android:id="@+id/productText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Apunta al producto"
+            android:textColor="#FFFFFFFF"
+            android:textStyle="bold"
+            android:textSize="28sp"
+            android:maxLines="2" />
+
+        <TextView
+            android:id="@+id/confidenceText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:layout_marginTop="10dp"
+            android:text=""
+            android:textColor="#CCFFFFFF"
+            android:textSize="16sp" />
+
+        <Space
+            android:layout_width="1dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Inicializando cámara…"
+            android:textColor="#99FFFFFF"
+            android:textSize="13sp"
+            android:maxLines="2" />
+    </LinearLayout>
+</FrameLayout>
